@@ -1,0 +1,10 @@
+!!!!!!!!!!!!!!
+Q_a
+    When grid resolution 'N' is bigger, L1_error is convergent 
+
+Q_b    
+    at CFL=0.5, The L1_error is still convergent, but it grows over time
+    at CFL=1,0, The L1_error is convergent, and equal to 0
+    at CFL=1.2, The L1_error is divergent, but blows up in the end
+    
+
