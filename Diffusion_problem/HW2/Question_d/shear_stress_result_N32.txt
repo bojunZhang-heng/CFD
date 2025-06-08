@@ -1,0 +1,8 @@
+t =  0.2
+ tau_analytical is   0.49011959989616366     
+ tau_numerical is    0.49033225336543040     
+
+t =  1.0
+ tau_analytical is   0.91778835013048166     
+ tau_numerical is    0.91791389781018806     
+

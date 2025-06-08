@@ -1,0 +1,5 @@
+When CFL=0.51 0.52
+The round-off error blows up
+
+When CFL = 0.50, 0.505
+The round-off error is just fine.
