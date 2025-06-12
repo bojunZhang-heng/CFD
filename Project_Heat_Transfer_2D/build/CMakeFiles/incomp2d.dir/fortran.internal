@@ -1,0 +1,6 @@
+# The fortran modules provided by this target.
+provides
+ fftcos.mod
+ mod_fft_data.mod
+ mod_param.mod
+ mod_variables.mod
