@@ -34,20 +34,25 @@
       include 'param.inc'
         PARAMETER ( n1h=n1/2 , n2h=n2/2 )
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/two/hx(2:n1,2:n2p1),hy(2:n1p1,2:n2), &
                  hxp(2:n1,2:n2p1),hyp(2:n1p1,2:n2)
       common/three/ax(2:n1,2:n2p1),ay(2:n1p1,2:n2)
       common/six/pr(n1,n2),phi(n1,n2),phip(n1,n2),prp(n1,n2)
       common/seven/x(n1p1),y(n2p1),xc(n1),yc(n2)
       dimension qxold(n1p1,n2p2)
+      dimension theta_1(n1,n2), theta_2(n1,n2), T(n1, n2)
+      dimension theta_1p(n1,n2), theta_2p(n1,n2)
+      dimension diag(n2), offd_L(n2), offd_R(n2), f_load(n2)
+      
         INTEGER IFAXX(13)
         REAL TRIGSX(3*n1h+1)
         COMMON /TRIG/  TRIGSX
         COMMON /FAX/   IFAXX
-      real len
+      real len,pt,ra, pe
+      integer, parameter ::  B = 0
 !     NAMELIST/INPUT/niter,iread,re,len,sar,dt,rerror
-      NAMELIST/INPUT/niter,nprof,iread,re,len,dt,rerror
+      NAMELIST/INPUT/niter,nprof,iread,ra,pt,len,dt,rerror
 ! FFT setup
       CALL FFTFAX(n1,IFAXX,TRIGSX)
       open(10,file='velprof1.dat',form='formatted', &
@@ -81,6 +86,11 @@
 ! input Reynolds number
       read(5,INPUT)
       write(7,INPUT)
+
+      re = sqrt(ra/pt)
+      pe = sqrt(ra*pt)
+      write(*,*) "re = " , re
+      write(*,*) "pe = " , pe
 ! if IREAD = 0, new start (else RESTART)
       IF (iread .eq. 0) THEN
       itbeg = 0
@@ -173,6 +183,23 @@
         qy(1,j) = -qy(2,j)
         qy(n1p2,j) = -qy(n1p1,j)
       enddo
+
+!***********************************************************
+! Apply Boundary Condition
+! Left and right
+!
+      do jj = 1, n2
+        T(1, jj) = -T(2, jj)
+        T(n2, jj) = 200.0 - T(n2, jj)
+      enddo
+
+!*****************************************
+! Bottom and Top
+!
+      do ii = 1, n1
+        T(ii, 1) = T(ii, 2)
+        T(ii, n1) = T(ii, n1-1)
+      enddo
 !
       ELSE
       read(201) itbeg
@@ -206,6 +233,8 @@
           qxold(i,j) = qx(i,j)
         enddo
       enddo
+      qxp = qx
+      qyp = qy
 !
 ! Back to Adams-Bashforth for the nonlinear term
 !         Crank-Nicoholson for the viscous term
@@ -254,10 +283,89 @@
         write(*,*) 'Iteration Number: ',itime
         goto 999
       endif
+
+!***************************************************************************
+! Slove Temperature Field
+!
+!***************************************************
+! Slove pi Field (sub-step 1)
+!
+  do jj = 2, n2
+    do ii = 2, n1
+      offd_L(ii) = -dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx)
+      diag(ii)   =  1 + dt / (pe*dx**2.0)
+      offd_R(ii) = -dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx)
+      f_load(ii) = -dt * (qx(ii-1, jj)  - qx(ii, jj))  / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
+                   -dt * (qxp(ii-1, jj) - qxp(ii, jj)) / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
+                   +dt / (dx**2.0 * pe) * (T(ii-1, jj) - 2*T(ii,jj) + T(ii+1,jj))  &
+                   -dt * (qy(ii, jj-1)  - qy(ii, jj))  / (8*dy) * (T(ii, jj+1)  - T(ii, jj-1)) &
+                   -dt * (qyp(ii, jj-1) - qyp(ii, jj)) / (8*dy) * (T(ii, jj+1)  - T(ii, jj-1)) &
+                   +dt / (dy**2.0 * pe) * (T(ii, jj-1) - 2*T(ii,jj) + T(ii,jj+1))  
+    enddo
+    diag(2)  = diag(2) + offd_R(2)
+    diag(n2) = diag(n2) + offd_R(n2)
+
+    call sy(2, n2, offd_L, diag, offd_R, f_load)
+    do ii = 2, n1
+      theta_1(ii, jj) = f_load(ii)
+    enddo
+  enddo
+  do ii = 2, n1
+      do jj = 2, n2
+        write(300, *) theta_1(ii, jj)
+      enddo
+  enddo
+
+!***************************************************
+! Slove theta Field (sub-step 2)
+!
+  do ii = 2, n1
+    do jj = 2, n2
+      offd_L(jj) = -dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)
+      diag(jj)   =  1 + dt / (pe*dy**2.0)
+      offd_R(jj) = -dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)
+      f_load(jj) = theta_1(ii,jj)
+    enddo
+    diag(2)  = diag(2) + offd_R(2)
+    diag(n2) = diag(n2) + offd_R(n2)
+    
+    call sy(2, n2, offd_L, diag, offd_R, f_load)
+    do jj = 2, n2
+      theta_2(ii, jj) = f_load(jj)
+    enddo
+  enddo
+
+!***************************************************
+! Slove Temperature Field (sub-step 3)
+!
+  T(ii,jj) = theta_2(ii,jj) + T(ii,jj)
+
+!***************************
+! Slove Temperature Field (Directly)
+!  do ii = 2, n1
+!    do jj = 2, n2
+!      i1 = (-dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)) &
+!         * (-dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx))
+!      j1 = (1 + dt / (pe*dy**2.0)) * (1 + dt / (pe*dx**2.0))
+!      k1 = (-dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)) &
+!         * (-dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx))
+!      T(ii,jj) = 1.0 &
+!               / (i1 + j1 + k1)
+!    enddo
+!  enddo 
+
+
 !
 ! here is the end of the time-stepping loop...
       enddo
-!
+
+      open(20, file='Tempreature.dat', status='unknown')
+      do ii = 1, n1
+        do jj = 1, n2
+          write(20, 100) T(ii, jj)
+        enddo
+      enddo
+100 format(f16.8)
   999 continue
        call output
 !
@@ -268,8 +376,10 @@
       write(202) x,y,xc,yc
       write(202) qx,qy,hxp,hyp
       write(202) pr,phi
-!
-      end
+
+
+  write(*,*) theta_1(4,5), theta_2(4,5)
+END Program
 !
 !******************************************************
 !
@@ -277,9 +387,10 @@
       include 'param.inc'
 ! calculate the non-linear terms (x-dir)
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/two/hx(2:n1,2:n2p1),hy(2:n1p1,2:n2), &
                  hxp(2:n1,2:n2p1),hyp(2:n1p1,2:n2)
+
 !
       do j=2,n2p1
         do i=2,n1
@@ -296,8 +407,12 @@
                   -(qx(i-1,j+1)+qx(i-1,j))*(qy(i-1,j)+qy(i,j))
           temp2 = qy(i,j+1)**2.0 - qy(i,j-1)**2.0
           hy(i,j) = -temp1/(4.*dx) -temp2/(2.*dy)
+          if (B == 1) then
+            hy(i,j) = hy(i,j)
+          endif
         enddo
       enddo
+
 !
       return
       end
@@ -308,7 +423,7 @@
       include 'param.inc'
 ! calculate viscous terms
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/three/ax(2:n1,2:n2p1),ay(2:n1p1,2:n2)
 !
       cc = 1.0/(2.0*re)
@@ -463,7 +578,7 @@
       subroutine ufinal(irk)
       include 'param.inc'
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/six/pr(n1,n2),phi(n1,n2),phip(n1,n2),prp(n1,n2)
 !
 ! calculate the vel. at t=n+1...
@@ -497,7 +612,7 @@
       subroutine press(irk)
       include 'param.inc'
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/two/hx(2:n1,2:n2p1),hy(2:n1p1,2:n2), &
                  hxp(2:n1,2:n2p1),hyp(2:n1p1,2:n2)
       common/three/ax(2:n1,2:n2p1),ay(2:n1p1,2:n2)
@@ -564,7 +679,7 @@
       subroutine output
       include 'param.inc'
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/two/hx(2:n1,2:n2p1),hy(2:n1p1,2:n2), &
                  hxp(2:n1,2:n2p1),hyp(2:n1p1,2:n2)
       common/three/ax(2:n1,2:n2p1),ay(2:n1p1,2:n2)
@@ -730,7 +845,7 @@
       enddo
 !
   905 format(6(e12.4))
-  906 format(x)
+  906 format(4x)
   907 format(2x,8f8.4)
   908 format(2x,8f8.2)
 !
@@ -784,7 +899,7 @@
         PARAMETER ( n1h=n1/2 , n2h=n2/2 )
 ! use trigonometric series method to calculate the poisson equation
       common/one/qx(n1p1,n2p2),qy(n1p2,n2p1),dx,dy,dx2,dy2, &
-                 dt,re,aaa(3),ggg(3),rrr(3)
+                 dt,re,aaa(3),ggg(3),rrr(3),qxp(n1p1,n2p2),qyp(n1p2,n2p1)
       common/six/pr(n1,n2),phi(n1,n2),phip(n1,n2),prp(n1,n2)
       dimension a(n2),b(n2),c(n2),d(n2),qrhs(n1,n2)
         INTEGER IFAXX(13)
