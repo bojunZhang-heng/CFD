@@ -185,22 +185,15 @@
       enddo
 
 !***********************************************************
-! Apply Boundary Condition
-! Left and right
+! Apply Initial Condition
 !
-      do jj = 1, n2
-        T(1, jj) = -T(2, jj)
-        T(n2, jj) = 200.0 - T(n2, jj)
-      enddo
+  do ii = 2, n1
+    do jj = 2, n2
+      T(ii, jj) = 50.0
+    enddo
+ enddo  
 
-!*****************************************
-! Bottom and Top
-!
-      do ii = 1, n1
-        T(ii, 1) = T(ii, 2)
-        T(ii, n1) = T(ii, n1-1)
-      enddo
-!
+
       ELSE
       read(201) itbeg
       read(201) tau,dx,dy,dx2,dy2
@@ -213,7 +206,35 @@
 !
       itbeg = itbeg+1
       niter = niter+itbeg-1
+      open(20, file='Tempreature.dat', status='unknown')
       do itime=itbeg,niter
+
+!***********************************************************
+! Apply Boundary Condition
+! Left and right
+!
+      do jj = 1, n2
+        T(1, jj) = -T(2, jj)
+        T(n2, jj) = 200.0 - T(n2-1, jj)
+      enddo
+
+!*****************************************
+! Bottom and Top
+!
+      do ii = 1, n1
+        T(ii, 1) = T(ii, 2)
+        T(ii, n1) = T(ii, n1-1)
+      enddo
+
+
+    if(itime == 1) then
+      do ii = 1, n1
+        do jj = 1, n2
+          write(20, 100) T(ii, jj)
+        enddo
+      enddo
+    endif
+
 !
 !     if(mod(itime-1,nprof).eq.0)then
 !      write(*,*)'itime-1=', itime-1, 'writing'
@@ -293,8 +314,8 @@
   do jj = 2, n2
     do ii = 2, n1
       offd_L(ii) = -dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx)
-      diag(ii)   =  1 + dt / (pe*dx**2.0)
-      offd_R(ii) = -dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx)
+      diag(ii)   =  1  + dt / (pe*dx**2.0)
+      offd_R(ii) = -dt / (2*pe*dx**2.0) + (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx)
       f_load(ii) = -dt * (qx(ii-1, jj)  - qx(ii, jj))  / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
                    -dt * (qxp(ii-1, jj) - qxp(ii, jj)) / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
                    +dt / (dx**2.0 * pe) * (T(ii-1, jj) - 2*T(ii,jj) + T(ii+1,jj))  &
@@ -302,18 +323,12 @@
                    -dt * (qyp(ii, jj-1) - qyp(ii, jj)) / (8*dy) * (T(ii, jj+1)  - T(ii, jj-1)) &
                    +dt / (dy**2.0 * pe) * (T(ii, jj-1) - 2*T(ii,jj) + T(ii,jj+1))  
     enddo
-    diag(2)  = diag(2) + offd_R(2)
-    diag(n2) = diag(n2) + offd_R(n2)
+
 
     call sy(2, n2, offd_L, diag, offd_R, f_load)
     do ii = 2, n1
       theta_1(ii, jj) = f_load(ii)
     enddo
-  enddo
-  do ii = 2, n1
-      do jj = 2, n2
-        write(300, *) theta_1(ii, jj)
-      enddo
   enddo
 
 !***************************************************
@@ -323,11 +338,9 @@
     do jj = 2, n2
       offd_L(jj) = -dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)
       diag(jj)   =  1 + dt / (pe*dy**2.0)
-      offd_R(jj) = -dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)
+      offd_R(jj) = -dt / (2*pe*dy**2.0) + (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)
       f_load(jj) = theta_1(ii,jj)
     enddo
-    diag(2)  = diag(2) + offd_R(2)
-    diag(n2) = diag(n2) + offd_R(n2)
     
     call sy(2, n2, offd_L, diag, offd_R, f_load)
     do jj = 2, n2
@@ -335,13 +348,22 @@
     enddo
   enddo
 
+
 !***************************************************
 ! Slove Temperature Field (sub-step 3)
 !
-  T(ii,jj) = theta_2(ii,jj) + T(ii,jj)
+!  write(400,*) "T_old = ", T(10, 10), theta_2(10, 10)
+  do ii = 2, n1
+      do jj = 2, n2
+        T(ii,jj) = theta_2(ii,jj) + T(ii,jj)
+        write(400,*) "theta = ", theta_1(ii, jj), theta_2(ii, jj)
+      enddo
+  enddo
+!  write(400,*) "T_new = ", T(10, 10)
 
 !***************************
 ! Slove Temperature Field (Directly)
+!
 !  do ii = 2, n1
 !    do jj = 2, n2
 !      i1 = (-dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)) &
@@ -349,7 +371,15 @@
 !      j1 = (1 + dt / (pe*dy**2.0)) * (1 + dt / (pe*dx**2.0))
 !      k1 = (-dt / (2*pe*dy**2.0) - (qy(ii,jj-1) + qy(ii,jj))*dt / (8*dy)) &
 !         * (-dt / (2*pe*dx**2.0) - (qx(ii-1,jj) + qx(ii,jj))*dt / (8*dx))
-!      T(ii,jj) = 1.0 &
+!
+!      aa = T(ii,jj) &
+!                   -dt * (qx(ii-1, jj)  - qx(ii, jj))  / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
+!                   -dt * (qxp(ii-1, jj) - qxp(ii, jj)) / (8*dx) * (T(ii+1, jj)  - T(ii-1, jj)) &
+!                   +dt / (dx**2.0 * pe) * (T(ii-1, jj) - 2*T(ii,jj) + T(ii+1,jj))  &
+!                   -dt * (qy(ii, jj-1)  - qy(ii, jj))  / (8*dy) * (T(ii, jj+1)  - T(ii, jj-1)) &
+!                   -dt * (qyp(ii, jj-1) - qyp(ii, jj)) / (8*dy) * (T(ii, jj+1)  - T(ii, jj-1)) &
+!                   +dt / (dy**2.0 * pe) * (T(ii, jj-1) - 2*T(ii,jj) + T(ii,jj+1))  
+!      T(ii,jj) = aa &
 !               / (i1 + j1 + k1)
 !    enddo
 !  enddo 
@@ -357,9 +387,9 @@
 
 !
 ! here is the end of the time-stepping loop...
+!
       enddo
 
-      open(20, file='Tempreature.dat', status='unknown')
       do ii = 1, n1
         do jj = 1, n2
           write(20, 100) T(ii, jj)
@@ -378,7 +408,6 @@
       write(202) pr,phi
 
 
-  write(*,*) theta_1(4,5), theta_2(4,5)
 END Program
 !
 !******************************************************
@@ -500,7 +529,7 @@ END Program
         enddo
 
 ! LPW2017: boundary conditions
-          b(2) = b(2) - a(2)
+           b(2) = b(2) - a(2)
           b(n2p1) = b(n2p1) - c(n2p1)
 
         call sy(2,n2p1,a,b,c,d)
@@ -961,3 +990,4 @@ END Program
       end
 !
 !*************************************************************
+
